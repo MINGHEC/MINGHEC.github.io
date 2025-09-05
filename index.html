@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>图片转PPT生成器</title>
+    <!-- 引入Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 引入PptxGenJS库 -->
+    <script src="https://unpkg.com/pptxgenjs@3.12.0/dist/pptxgen.bundle.js"></script>
+    <style>
+        .fade-in {
+            animation: fadeIn 0.5s ease-in-out;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        
+        .slide-in {
+            animation: slideIn 0.5s ease-out;
+        }
+        
+        @keyframes slideIn {
+            from { transform: translateY(20px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+        
+        .grid-preview {
+            display: grid;
+            gap: 0.25rem;
+            width: 100%;
+            height: 100%;
+            padding: 0.5rem;
+        }
+    </style>
+</head>
+<body class="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-8">
+    <div id="app" class="max-w-7xl mx-auto">
+        <div class="bg-white rounded-2xl shadow-xl p-8 fade-in">
+            <h1 class="text-4xl font-bold text-gray-800 mb-2">PPT Generator</h1>
+            <p class="text-gray-600 mb-8">Select multiple images to automatically generate a PowerPoint presentation</p>
+            
+            <div class="border-2 border-dashed border-gray-300 rounded-xl p-12 text-center mb-8">
+                <svg class="mx-auto h-12 w-12 text-gray-400 mb-4" stroke="currentColor" fill="none" viewBox="0 0 48 48">
+                    <path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                
+                <label for="file-upload" class="cursor-pointer">
+                    <span class="mt-2 block text-sm font-medium text-gray-900">
+                        Click to select images or drag and drop
+                    </span>
+                    <input
+                        id="file-upload"
+                        type="file"
+                        class="sr-only"
+                        multiple
+                        accept="image/jpeg,image/jpg,image/png"
+                    />
+                    <p class="mt-1 text-xs text-gray-500">
+                        JPG, JPEG, PNG up to 10MB each
+                    </p>
+                </label>
+            </div>
+            
+            <div id="selected-images-container" class="hidden mb-8">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-2xl font-semibold text-gray-800">
+                        Selected Images (<span id="images-count">0</span>)
+                    </h2>
+                    <button
+                        id="clear-all-btn"
+                        class="px-4 py-2 text-sm text-red-600 hover:text-red-700 font-medium"
+                    >
+                        Clear All
+                    </button>
+                </div>
+                
+                <div id="thumbnails-container" class="grid grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-2 mb-6">
+                    <!-- 缩略图将在这里动态生成 -->
+                </div>
+                
+                <div id="slides-preview" class="mb-6">
+                    <h3 class="text-lg font-semibold text-gray-700 mb-3">Slide Preview</h3>
+                    <div id="slides-container" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <!-- 幻灯片预览将在这里动态生成 -->
+                    </div>
+                </div>
+                
+                <div class="flex justify-center">
+                    <button
+                        id="generate-btn"
+                        class="px-8 py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-semibold rounded-lg shadow-md transition-colors duration-200"
+                    >
+                        Generate PowerPoint
+                    </button>
+                </div>
+            </div>
+            
+            <div class="mt-8 p-4 bg-blue-50 rounded-lg">
+                <h3 class="font-semibold text-gray-800 mb-2">Features:</h3>
+                <ul class="text-sm text-gray-600 space-y-1">
+                    <li>• A4 paper size in landscape orientation</li>
+                    <li>• Maximum 10 images per slide with automatic grid layout</li>
+                    <li>• Images maintain aspect ratio without distortion</li>
+                    <li>• Automatic spacing and margins for clean presentation</li>
+                    <li>• Direct download of .pptx file</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 状态管理
+        const state = {
+            selectedImages: [],
+            slides: [],
+            isGenerating: false
+        };
+
+        // 工具函数
+        function getOptimalGrid(count) {
+            const grids = [
+                { count: 1, rows: 1, cols: 1 },
+                { count: 2, rows: 1, cols: 2 },
+                { count: 3, rows: 1, cols: 3 },
+                { count: 4, rows: 2, cols: 2 },
+                { count: 5, rows: 2, cols: 3 },
+                { count: 6, rows: 2, cols: 3 },
+                { count: 7, rows: 3, cols: 3 },
+                { count: 8, rows: 2, cols: 4 },
+                { count: 9, rows: 3, cols: 3 },
+                { count: 10, rows: 2, cols: 5 },
+            ];
+            
+            const grid = grids.find(g => g.count >= count) || grids[grids.length - 1];
+            return { rows: grid.rows, cols: grid.cols };
+        }
+
+        function loadImage(file) {
+            return new Promise((resolve) => {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const img = new Image();
+                    img.onload = () => {
+                        resolve({
+                            file,
+                            url: e.target.result,
+                            width: img.width,
+                            height: img.height
+                        });
+                    };
+                    img.src = e.target.result;
+                };
+                reader.readAsDataURL(file);
+            });
+        }
+
+        // DOM 操作函数
+        function updateUI() {
+            // 更新图片计数
+            document.getElementById('images-count').textContent = state.selectedImages.length;
+            
+            // 显示/隐藏容器
+            const container = document.getElementById('selected-images-container');
+            if (state.selectedImages.length > 0) {
+                container.classList.remove('hidden');
+            } else {
+                container.classList.add('hidden');
+            }
+            
+            // 更新缩略图
+            updateThumbnails();
+            
+            // 更新幻灯片预览
+            updateSlidesPreview();
+        }
+
+        function updateThumbnails() {
+            const container = document.getElementById('thumbnails-container');
+            container.innerHTML = '';
+            
+            state.selectedImages.forEach((img, index) => {
+                const thumbDiv = document.createElement('div');
+                thumbDiv.className = 'relative group';
+                
+                const imgElement = document.createElement('img');
+                imgElement.src = img.url;
+                imgElement.alt = `Selected ${index + 1}`;
+                imgElement.className = 'w-full h-20 object-cover rounded-lg';
+                
+                const overlayDiv = document.createElement('div');
+                overlayDiv.className = 'absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-30 rounded-lg transition-opacity';
+                
+                thumbDiv.appendChild(imgElement);
+                thumbDiv.appendChild(overlayDiv);
+                
+                container.appendChild(thumbDiv);
+            });
+        }
+
+        function updateSlidesPreview() {
+            const container = document.getElementById('slides-container');
+            container.innerHTML = '';
+            
+            state.slides.forEach((slide, slideIndex) => {
+                const slideDiv = document.createElement('div');
+                slideDiv.className = 'bg-gray-100 rounded-lg p-4 slide-in';
+                
+                const title = document.createElement('p');
+                title.className = 'text-sm text-gray-600 mb-2';
+                title.textContent = `Slide ${slideIndex + 1} - ${slide.images.length} images (${slide.grid.rows}x${slide.grid.cols} grid)`;
+                
+                const previewDiv = document.createElement('div');
+                previewDiv.className = 'bg-white rounded-lg p-2 aspect-video flex items-center justify-center';
+                
+                const gridDiv = document.createElement('div');
+                gridDiv.className = 'grid-preview';
+                gridDiv.style.gridTemplateColumns = `repeat(${slide.grid.cols}, 1fr)`;
+                gridDiv.style.gridTemplateRows = `repeat(${slide.grid.rows}, 1fr)`;
+                
+                for (let i = 0; i < slide.images.length; i++) {
+                    const cellDiv = document.createElement('div');
+                    cellDiv.className = 'bg-gray-200 rounded';
+                    gridDiv.appendChild(cellDiv);
+                }
+                
+                previewDiv.appendChild(gridDiv);
+                slideDiv.appendChild(title);
+                slideDiv.appendChild(previewDiv);
+                
+                container.appendChild(slideDiv);
+            });
+        }
+
+        function setGenerating(isGenerating) {
+            state.isGenerating = isGenerating;
+            const button = document.getElementById('generate-btn');
+            
+            if (isGenerating) {
+                button.disabled = true;
+                button.innerHTML = `
+                    <span class="flex items-center">
+                        <svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        Generating...
+                    </span>
+                `;
+            } else {
+                button.disabled = false;
+                button.textContent = 'Generate PowerPoint';
+            }
+        }
+
+        // 事件处理函数
+        async function handleFileSelect(e) {
+            const files = Array.from(e.target.files || []);
+            const imageFiles = files.filter(file => 
+                file.type.startsWith('image/') && 
+                (file.type.includes('jpeg') || file.type.includes('jpg') || file.type.includes('png'))
+            );
+            
+            const loadedImages = await Promise.all(imageFiles.map(loadImage));
+            state.selectedImages = loadedImages;
+            
+            // 计算幻灯片布局
+            state.slides = [];
+            for (let i = 0; i < loadedImages.length; i += 10) {
+                const slideImages = loadedImages.slice(i, i + 10);
+                const grid = getOptimalGrid(slideImages.length);
+                state.slides.push({ images: slideImages, grid });
+            }
+            
+            updateUI();
+        }
+
+        async function generatePPT() {
+            if (state.selectedImages.length === 0) return;
+            
+            setGenerating(true);
+            
+            try {
+                const pptx = new PptxGenJS();
+                
+                // Set default slide size to A4 Landscape (11.69" x 8.27")
+                pptx.defineLayout({ name: 'A4', width: 11.69, height: 8.27 });
+                pptx.layout = 'A4';
+                
+                for (const slideLayout of state.slides) {
+                    const slide = pptx.addSlide();
+                    const { rows, cols } = slideLayout.grid;
+                    const images = slideLayout.images;
+                    
+                    // Calculate dimensions with margins
+                    const margin = 0.3; // inches
+                    const spacing = 0.1; // inches between images
+                    const availableWidth = 11.69 - (2 * margin);
+                    const availableHeight = 8.27 - (2 * margin);
+                    
+                    const imageWidth = (availableWidth - (cols - 1) * spacing) / cols;
+                    const imageHeight = (availableHeight - (rows - 1) * spacing) / rows;
+                    
+                    images.forEach((img, index) => {
+                        const row = Math.floor(index / cols);
+                        const col = index % cols;
+                        
+                        const x = margin + col * (imageWidth + spacing);
+                        const y = margin + row * (imageHeight + spacing);
+                        
+                        // Calculate actual dimensions maintaining aspect ratio
+                        const aspectRatio = img.width / img.height;
+                        let finalWidth = imageWidth;
+                        let finalHeight = imageHeight;
+                        
+                        if (aspectRatio > imageWidth / imageHeight) {
+                            finalHeight = imageWidth / aspectRatio;
+                        } else {
+                            finalWidth = imageHeight * aspectRatio;
+                        }
+                        
+                        // Center the image in its cell
+                        const xOffset = x + (imageWidth - finalWidth) / 2;
+                        const yOffset = y + (imageHeight - finalHeight) / 2;
+                        
+                        slide.addImage({
+                            data: img.url,
+                            x: xOffset,
+                            y: yOffset,
+                            w: finalWidth,
+                            h: finalHeight
+                        });
+                    });
+                }
+                
+                // Generate and download the file
+                await pptx.writeFile({ fileName: `photo_presentation_${Date.now()}.pptx` });
+            } catch (error) {
+                console.error('Error generating PPT:', error);
+                alert('Failed to generate PowerPoint. Please try again.');
+            } finally {
+                setGenerating(false);
+            }
+        }
+
+        function clearSelection() {
+            state.selectedImages = [];
+            state.slides = [];
+            updateUI();
+        }
+
+        // 初始化事件监听器
+        document.getElementById('file-upload').addEventListener('change', handleFileSelect);
+        document.getElementById('generate-btn').addEventListener('click', generatePPT);
+        document.getElementById('clear-all-btn').addEventListener('click', clearSelection);
+
+        // 添加拖放功能
+        const dropArea = document.querySelector('.border-dashed');
+        
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            dropArea.addEventListener(eventName, preventDefaults, false);
+        });
+        
+        function preventDefaults(e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+        
+        ['dragenter', 'dragover'].forEach(eventName => {
+            dropArea.addEventListener(eventName, highlight, false);
+        });
+        
+        ['dragleave', 'drop'].forEach(eventName => {
+            dropArea.addEventListener(eventName, unhighlight, false);
+        });
+        
+        function highlight() {
+            dropArea.classList.add('border-blue-400', 'bg-blue-50');
+        }
+        
+        function unhighlight() {
+            dropArea.classList.remove('border-blue-400', 'bg-blue-50');
+        }
+        
+        dropArea.addEventListener('drop', handleDrop, false);
+        
+        function handleDrop(e) {
+            const dt = e.dataTransfer;
+            const files = dt.files;
+            
+            // 创建一个假的event对象来模拟文件输入
+            const event = {
+                target: {
+                    files: files
+                }
+            };
+            
+            handleFileSelect(event);
+        }
+    </script>
+</body>
+</html>
